@@ -1,33 +1,35 @@
 ﻿#include <iostream>
 #include<opencv2/opencv.hpp>
 #include<cmath>
+#include"windows.h"
 
 using namespace std;
 using namespace cv;
 
-
 //检测火焰
-void detect_fire(cv::Mat&srcMat,cv::Mat&dstMat)
+void detect_fire(cv::Mat&srcMat, cv::Mat&dstMat)
 {
 	cv::Mat gryMat;
 	cv::Mat binMat;
 	cv::Mat hsvMat;
 
-
 	//火焰HSV范围,参考https://www.cnblogs.com/wangyblzu/p/5710715.html
 	double i_minH1 = 0;
 	double i_maxH1 = 10;
-	double i_minH2 = 125;
+	//0-10
+	double i_minH2 = 156;
 	double i_maxH2 = 180;
-	double i_minS = 43;
+	//125-180
+	double i_minS = 100;
 	double i_maxS = 255;
-	double i_minV = 46;
+	//43-255
+	double i_minV = 150;
 	double i_maxV = 255;
-
+	//46-255
 
 	//获得灰度图
 	cv::cvtColor(srcMat, gryMat, COLOR_BGR2GRAY);
-	cv::Mat detectMat = Mat::zeros(gryMat.size(),gryMat.type());
+	cv::Mat detectMat = Mat::zeros(gryMat.size(), gryMat.type());
 	//转为HSV格式
 	cv::cvtColor(srcMat, hsvMat, COLOR_BGR2HSV);
 	std::vector<Mat>channels;
@@ -43,7 +45,7 @@ void detect_fire(cv::Mat&srcMat,cv::Mat&dstMat)
 	//遍历像素，捕捉火焰
 	int rows = srcMat.rows;
 	int cols = srcMat.cols;
-	for (int i = 200; i < rows; i++)
+	for (int i = 210; i < rows; i++)
 	{
 		for (int j = 400; j < cols; j++)
 		{
@@ -64,7 +66,7 @@ void detect_fire(cv::Mat&srcMat,cv::Mat&dstMat)
 	for (int i = 0; i < contours.size(); i++)
 	{
 		RotatedRect rbox = minAreaRect(contours[i]);
-		drawContours(srcMat, contours, i, Scalar(0, 255, 255), 1, 8);
+		//drawContours(srcMat, contours, i, Scalar(0, 255, 255), 1, 8);
 		Point2f points[4];
 		rbox.points(points);
 		for (int j = 0; j < 4; j++)
@@ -72,12 +74,9 @@ void detect_fire(cv::Mat&srcMat,cv::Mat&dstMat)
 			cv::line(dstMat, points[j], points[j < 3 ? j + 1 : 0], Scalar(255, 255, 255), 2, LINE_AA);
 		}
 	}
-
-
 }
 
-
-//计算拟合曲线多项式的系数矩阵,参考https ://blog.csdn.net/guduruyu/java/article/details/72866144 
+//计算拟合曲线多项式的系数矩阵,参考https ://blog.csdn.net/guduruyu/java/article/details/72866144
 bool polynomial_curve_fit(std::vector<cv::Point>& key_point, int n, cv::Mat& A)
 {
 	//Number of key points
@@ -114,7 +113,6 @@ bool polynomial_curve_fit(std::vector<cv::Point>& key_point, int n, cv::Mat& A)
 	return true;
 }
 
-
 //寻找水柱上的点
 void find_points(cv::Mat& srcMat, std::vector<cv::Point>& key_points)
 {
@@ -127,6 +125,28 @@ void find_points(cv::Mat& srcMat, std::vector<cv::Point>& key_points)
 				key_points.push_back(cv::Point(i, j));
 				break;
 			}
+		}
+	}
+}
+
+//噪音消除
+void noise_remove(cv::Mat& srcMat)
+{
+	//右上角干扰区域
+	for (int i = 0; i < 100; i++)
+	{
+		for (int j = 300; j < srcMat.cols; j++)
+		{
+			srcMat.at<uchar>(i, j) = 0;
+		}
+	}
+
+	//左边干扰区域
+	for (int i = 0; i < srcMat.rows; i++)
+	{
+		for (int j = 0; j < 180; j++)
+		{
+			srcMat.at<uchar>(i, j) = 0;
 		}
 	}
 }
@@ -154,14 +174,18 @@ int main()
 	cv::Mat rgbMat2;
 
 	//进入循环
-	while (0)
+	while (1)
 	{
 		cap >> frame;
+		if (!frame.data)
+		{
+			std::cout << "Fail to load!" << endl;
+			break;
+		}
 
 		//保存彩色图
 		rgbMat1 = frame.clone();
 		rgbMat2 = frame.clone();
-
 
 		//转为灰度图
 		cv::cvtColor(frame, frame, COLOR_BGR2GRAY);
@@ -174,7 +198,7 @@ int main()
 			cv::imshow("dst", rgbMat1);
 			waitKey(30);
 		}
-		else if (cnt <= 100)//还未出现水柱
+		else if (cnt <= 70)//还未出现水柱
 		{
 			detect_fire(rgbMat1, rgbMat1);
 			cv::imshow("dst", rgbMat1);
@@ -187,17 +211,18 @@ int main()
 			absdiff(frame, bgMat, subMat);
 			//二值化
 			threshold(subMat, binMat, 100, 255, THRESH_BINARY);
+			//去除干扰
+			noise_remove(binMat);
 			//寻找水柱上的点
 			std::vector<cv::Point>points;
 			find_points(binMat, points);
-
 
 			//拟合曲线，参考https://blog.csdn.net/guduruyu/article/details/72866144
 			cv::Mat coefficients;
 			polynomial_curve_fit(points, 3, coefficients);
 			//计算拟合点
 			std::vector<cv::Point>points_fitted;
-			for (int x = 150; x < 460; x++)
+			for (int x = 175; x < 420; x++)
 			{
 				double y = coefficients.at<double>(0, 0) + coefficients.at<double>(1, 0)*x + coefficients.at<double>(2, 0)*std::pow(x, 2) + coefficients.at<double>(3, 0)*std::pow(x, 3);
 				points_fitted.push_back(cv::Point(x, y));
@@ -215,4 +240,3 @@ int main()
 	waitKey(0);
 	return 0;
 }
-
